@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "salesforce": {
+      "command": "node",
+      "args": ["C:/Users/PMY/Desktop/bot/mcp-salesforce-claude/mcp-server.js"],
+      "env": {
+        "SF_CLIENT_ID": "your_consumer_key",
+        "SF_CLIENT_SECRET": "your_consumer_secret",
+        "SF_USERNAME": "your_username@example.com",
+        "SF_PASSWORD": "your_password",
+        "SF_SECURITY_TOKEN": "your_security_token",
+        "SF_LOGIN_URL": "https://login.salesforce.com"
+      }
+    }
+  }
+}
