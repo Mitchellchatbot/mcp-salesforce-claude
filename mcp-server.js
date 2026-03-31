@@ -271,8 +271,7 @@ server.tool(
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const soql = `SELECT Id, FirstName, LastName, Email, Phone, Company,
-                         Status, LeadSource, Industry, AnnualRevenue,
-                         NumberOfEmployees, Rating, Title,
+                         Status, LeadSource, Industry, Rating, Title,
                          CreatedDate, LastModifiedDate
                   FROM Lead
                   ${where}
