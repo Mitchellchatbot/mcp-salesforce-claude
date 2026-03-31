@@ -8,18 +8,24 @@ const jsforce = require('jsforce');
 const Anthropic = require('@anthropic-ai/sdk');
 
 // ─── Validate required env vars ──────────────────────────────────────────────
-const REQUIRED_ENV = [
-  'SF_CLIENT_ID',
-  'SF_CLIENT_SECRET',
-  'SF_REDIRECT_URI',
-  'ANTHROPIC_API_KEY',
-  'SESSION_SECRET',
-];
-for (const key of REQUIRED_ENV) {
+for (const key of ['SF_CLIENT_ID', 'SF_CLIENT_SECRET']) {
   if (!process.env[key]) {
     console.error(`Missing required environment variable: ${key}`);
     process.exit(1);
   }
+}
+
+// Derive redirect URI from Railway domain if not explicitly set
+if (!process.env.SF_REDIRECT_URI) {
+  const domain = process.env.RAILWAY_PUBLIC_DOMAIN;
+  process.env.SF_REDIRECT_URI = domain
+    ? `https://${domain}/oauth/callback`
+    : `http://localhost:${process.env.PORT || 3000}/oauth/callback`;
+}
+
+// Generate a session secret if not provided
+if (!process.env.SESSION_SECRET) {
+  process.env.SESSION_SECRET = require('crypto').randomBytes(32).toString('hex');
 }
 
 const PORT = process.env.PORT || 3000;
