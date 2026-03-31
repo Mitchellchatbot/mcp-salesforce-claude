@@ -2,8 +2,10 @@
 
 require('dotenv').config();
 
+const http = require('http');
+const express = require('express');
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
-const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { z } = require('zod');
 const jsforce = require('jsforce');
 
@@ -90,8 +92,10 @@ async function getConnection() {
   return _conn;
 }
 
-// ─── MCP server ───────────────────────────────────────────────────────────────
+// ─── MCP server factory ───────────────────────────────────────────────────────
+// A new McpServer instance is created per HTTP request (stateless transport).
 
+function createServer() {
 const server = new McpServer({
   name: 'salesforce',
   version: '1.0.0',
@@ -468,15 +472,23 @@ server.tool(
   }
 );
 
-// ─── Start (stdio transport) ──────────────────────────────────────────────────
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  // MCP servers communicate over stdio — do NOT write to stdout
-  process.stderr.write('Salesforce MCP server running on stdio\n');
+  return server;
 }
 
-main().catch((err) => {
-  process.stderr.write(`Fatal error: ${err.message}\n`);
-  process.exit(1);
+// ─── Start (HTTP transport) ───────────────────────────────────────────────────
+const app = express();
+app.use(express.json());
+
+app.post('/mcp', async (req, res) => {
+  const server = createServer();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  await server.connect(transport);
+  await transport.handleRequest(req, res, req.body);
+  await server.close();
+});
+
+const PORT = process.env.PORT || 3000;
+http.createServer(app).listen(PORT, () => {
+  console.log(`Salesforce MCP server listening on port ${PORT}`);
+  console.log(`MCP endpoint: POST /mcp`);
 });
