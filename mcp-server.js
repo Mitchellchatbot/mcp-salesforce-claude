@@ -474,11 +474,63 @@ server.tool(
   return server;
 }
 
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+const crypto = require('crypto');
+
+if (!process.env.API_KEY) {
+  console.error('Missing required environment variable: API_KEY');
+  process.exit(1);
+}
+
+/**
+ * Constant-time comparison of the presented key against the configured API_KEY.
+ */
+function isValidApiKey(presented) {
+  if (typeof presented !== 'string' || presented.length === 0) return false;
+  const a = Buffer.from(presented);
+  const b = Buffer.from(process.env.API_KEY);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Require a valid API key on the MCP endpoint, supplied as any of:
+ *   Authorization: Bearer <key>   (MCP clients that support custom headers)
+ *   x-api-key: <key>
+ *   ?key=<key> / ?api_key=<key>   (claude.ai web connectors, which only take a URL)
+ * Returns a JSON-RPC-shaped 401 so MCP clients surface a clean error.
+ */
+function requireApiKey(req, res, next) {
+  let presented = null;
+
+  const authHeader = req.get('authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    presented = authHeader.slice('Bearer '.length).trim();
+  } else if (req.get('x-api-key')) {
+    presented = req.get('x-api-key').trim();
+  } else if (typeof req.query.key === 'string') {
+    presented = req.query.key.trim();
+  } else if (typeof req.query.api_key === 'string') {
+    presented = req.query.api_key.trim();
+  }
+
+  if (!isValidApiKey(presented)) {
+    res.set('WWW-Authenticate', 'Bearer');
+    return res.status(401).json({
+      jsonrpc: '2.0',
+      error: { code: -32001, message: 'Unauthorized: valid API key required' },
+      id: req.body?.id ?? null,
+    });
+  }
+  next();
+}
+
 // ─── Start (HTTP transport) ───────────────────────────────────────────────────
 const app = express();
 app.use(express.json());
 
-app.post('/mcp', async (req, res) => {
+app.post('/mcp', requireApiKey, async (req, res) => {
   const server = createServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);

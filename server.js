@@ -28,6 +28,12 @@ if (!process.env.SESSION_SECRET) {
   process.env.SESSION_SECRET = require('crypto').randomBytes(32).toString('hex');
 }
 
+// API key used to gate the server's own data/Claude endpoints.
+if (!process.env.API_KEY) {
+  console.error('Missing required environment variable: API_KEY');
+  process.exit(1);
+}
+
 const PORT = process.env.PORT || 3000;
 const SF_LOGIN_URL = process.env.SF_LOGIN_URL || 'https://login.salesforce.com';
 
@@ -52,6 +58,45 @@ app.use(
     cookie: { secure: process.env.NODE_ENV === 'production' },
   })
 );
+
+// ─── Auth ────────────────────────────────────────────────────────────────────
+
+const crypto = require('crypto');
+
+/**
+ * Constant-time comparison of the presented key against the configured API_KEY.
+ * Avoids leaking length/content via early-exit timing.
+ */
+function isValidApiKey(presented) {
+  if (typeof presented !== 'string' || presented.length === 0) return false;
+  const a = Buffer.from(presented);
+  const b = Buffer.from(process.env.API_KEY);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Require a valid API key, supplied as either:
+ *   Authorization: Bearer <key>
+ *   x-api-key: <key>
+ * Applied to the data/Claude endpoints; GET /, health, and the OAuth flow stay open.
+ */
+function requireApiKey(req, res, next) {
+  let presented = null;
+
+  const authHeader = req.get('authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    presented = authHeader.slice('Bearer '.length).trim();
+  } else if (req.get('x-api-key')) {
+    presented = req.get('x-api-key').trim();
+  }
+
+  if (!isValidApiKey(presented)) {
+    res.set('WWW-Authenticate', 'Bearer');
+    return res.status(401).json({ error: 'Unauthorized: valid API key required' });
+  }
+  next();
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -126,10 +171,11 @@ app.get('/', (_req, res) => {
       'GET /oauth/callback': 'OAuth2 callback (handled automatically)',
       'GET /oauth/status': 'Check authentication status',
       'GET /oauth/logout': 'Clear Salesforce session',
-      'GET /salesforce/accounts': 'Fetch Salesforce Accounts (query param: limit)',
-      'GET /salesforce/accounts/analyze': 'Fetch accounts + Claude analysis (query param: limit)',
-      'POST /analyze': 'Send custom account data to Claude for analysis',
+      'GET /salesforce/accounts': 'Fetch Salesforce Accounts (query param: limit) — requires API key',
+      'GET /salesforce/accounts/analyze': 'Fetch accounts + Claude analysis (query param: limit) — requires API key',
+      'POST /analyze': 'Send custom account data to Claude for analysis — requires API key',
     },
+    auth: 'Protected endpoints require an API key via "Authorization: Bearer <key>" or "x-api-key: <key>".',
   });
 });
 
@@ -186,7 +232,7 @@ app.get('/oauth/logout', (req, res) => {
 });
 
 // GET /salesforce/accounts – fetch accounts from Salesforce
-app.get('/salesforce/accounts', async (req, res) => {
+app.get('/salesforce/accounts', requireApiKey, async (req, res) => {
   try {
     const conn = getConnection(req);
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 200);
@@ -204,7 +250,7 @@ app.get('/salesforce/accounts', async (req, res) => {
 });
 
 // GET /salesforce/accounts/analyze – fetch accounts and run Claude analysis
-app.get('/salesforce/accounts/analyze', async (req, res) => {
+app.get('/salesforce/accounts/analyze', requireApiKey, async (req, res) => {
   try {
     const conn = getConnection(req);
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 200);
@@ -229,7 +275,7 @@ app.get('/salesforce/accounts/analyze', async (req, res) => {
 });
 
 // POST /analyze – send custom account data to Claude (no Salesforce required)
-app.post('/analyze', async (req, res) => {
+app.post('/analyze', requireApiKey, async (req, res) => {
   const { accounts } = req.body;
 
   if (!Array.isArray(accounts) || accounts.length === 0) {
