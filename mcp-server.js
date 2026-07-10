@@ -495,9 +495,10 @@ function isValidApiKey(presented) {
 }
 
 /**
- * Require a valid API key on the MCP endpoint, supplied as either:
- *   Authorization: Bearer <key>
+ * Require a valid API key on the MCP endpoint, supplied as any of:
+ *   Authorization: Bearer <key>   (MCP clients that support custom headers)
  *   x-api-key: <key>
+ *   ?key=<key> / ?api_key=<key>   (claude.ai web connectors, which only take a URL)
  * Returns a JSON-RPC-shaped 401 so MCP clients surface a clean error.
  */
 function requireApiKey(req, res, next) {
@@ -508,6 +509,10 @@ function requireApiKey(req, res, next) {
     presented = authHeader.slice('Bearer '.length).trim();
   } else if (req.get('x-api-key')) {
     presented = req.get('x-api-key').trim();
+  } else if (typeof req.query.key === 'string') {
+    presented = req.query.key.trim();
+  } else if (typeof req.query.api_key === 'string') {
+    presented = req.query.api_key.trim();
   }
 
   if (!isValidApiKey(presented)) {
